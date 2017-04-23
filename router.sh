@@ -42,8 +42,26 @@ function nsr_start {
   IF_LIST=${!IF_VAR}
   export INST_DIR="$DIR/instance/$1"
 
+  # Tears down everything
+  # $1 Message
+  # $2 Interface to delete
+  function fail {
+    echo $1
+    if [[ ! -z $2 ]]; then
+      ip link del $2
+    fi
+    nsr_stop_internal $INSTANCE
+    exit 1
+  }
+
+  if [ ! -d "$INST_DIR" ]; then
+    mkdir -p "$INST_DIR"
+  fi
+
   if [ "$IF_LIST" = "" ] && [ -f "$INST_DIR/interfaces" ]; then
     IF_LIST=$(cat "$INST_DIR/interfaces")
+  else
+    echo "$IF_LIST" > "$INST_DIR/interfaces"
   fi
 
   if [ "$IF_LIST" = "" ]; then
@@ -51,10 +69,6 @@ function nsr_start {
     echo "Set environment variable IF_$1, example: IF_$1=\"eth1 wifi0\""
     echo "This will map eth1 to eth0 and wifi0 to eth1"
     exit 1
-  fi
-
-  if [ ! -d "$INST_DIR" ]; then
-    mkdir -p "$INST_DIR"
   fi
 
   for script in start stop reload; do
@@ -66,10 +80,10 @@ function nsr_start {
   done
 
   if [ -f /var/run/netns/$1 ]; then
-    echo "Instance already started, try restart"
-    exit 0
+    echo "Instance already started or namespace already exists, try restart"
+    exit 2
   fi
-  ip netns add $1 || exit 1
+  ip netns add $1 || (echo "Unable to create namespace $1"; false) || exit 3
  
   VETH=0
   while ip link show dev veth$VETH >/dev/null 2>&1;
@@ -79,24 +93,29 @@ function nsr_start {
   IF_CNT=0
   IF_NAME="${1}-eth"
 
-  echo "$IF_LIST" > "$INST_DIR/interfaces"
 
   for IF in $IF_LIST; do
-    ip link add ${IF_NAME}${IF_CNT} type veth peer veth$VETH || (
-      echo "Unable to create interface: ${IF_NAME}${IF_CNT} linked to veth$VETH"
-      ip link del ${IF_NAME}${IF_CNT}
-      nsr_stop_internal $1
-      exit 1
-    ) || exit 1
-    ip link set dev veth$VETH netns $1 || (
-      echo "Unable to move interface int-${IF_NAME}${IF_CNT} to namespace ${1}"
-      ip link del ${IF_NAME}${IF_CNT}
-      nsr_stop_internal $1
-      exit 1
-    ) || exit 1
-    ip netns exec $1 ip link set dev veth$VETH name eth${IF_CNT}
-    ip link set ${IF_NAME}${IF_CNT} up
-    brctl addif $IF ${IF_NAME}${IF_CNT}
+    BRIDGE=$(ip link show dev $IF type bridge)
+    NAME="${IF_NAME}${IF_CNT}"
+    if [ "$BRIDGE" = "" ]; then
+      echo "Bridge $IF doesn't exist, trying to create it"
+      ip link add $IF type bridge || fail "Unable to create bridge $IF" || exit 32
+      ip link set $IF up || fail "Unable to start bridge $IF" || exit 33
+    fi
+
+    echo "Bringing up $NAME (bridge $IF):"
+    ip link add $NAME type veth peer veth$VETH || fail "" $NAME || exit 34
+    ip link set dev veth$VETH netns $1 || fail "Unable to move $NAME veth to namespace ${1}" $NAME || exit 35
+
+    # Rename inside interface
+    ip netns exec $1 ip link set dev veth$VETH name eth${IF_CNT} || fail "Unable to rename inside interface to eth${IF_CNT}" || exit 36
+
+    # Join outside interface to bridge
+    ip link set dev $NAME master $IF || fail "Unable to join $NAME to bridge $IF" || exit 37
+
+    # Bring up outside interface
+    ip link set $NAME up || fail "Unable to bring up $NAME (outside)" || exit 38
+
     IF_CNT=$[IF_CNT + 1]
   done
 
@@ -112,11 +131,11 @@ function nsr_stop {
       kill $pid
     else
       nsr_stop_internal $1
-      exit 0
+      exit $?
     fi
   else
     nsr_stop_internal $1
-    exit 0
+    exit $?
   fi
   
   # 100 x 0.2 = 20 seconds
@@ -132,6 +151,7 @@ function nsr_stop {
 
   # Force stop
   nsr_stop_internal $1
+  exit $?
 }
 
 function nsr_stop_internal {
@@ -148,12 +168,13 @@ function nsr_stop_internal {
         done
       fi
     fi
-    for IF in $IF_LIST; do
-      ip link del ${1}-eth${IF_CNT} >/dev/null 2>&1
-      IF_CNT=$[IF_CNT + 1]
-    done
     ip netns del $1
   fi
+  IF_CNT=0
+  for IF in $IF_LIST; do
+    ip link del ${1}-eth${IF_CNT} >/dev/null 2>&1
+    IF_CNT=$[IF_CNT + 1]
+  done
 }
 
 function nsr_inside {
