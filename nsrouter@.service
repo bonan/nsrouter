@@ -1,0 +1,13 @@
+[Unit]
+Description=Namespace Linux Router
+After=network.target
+
+[Service]
+Environment="NS_DEBUG=0"
+EnvironmentFile=/etc/default/nsrouter
+ExecStart=/usr/local/nsrouter/router.sh start %i
+ExecStop=/usr/local/nsrouter/router.sh stop %i
+ExecReload=/usr/local/nsrouter/router.sh reload %i
+
+[Install]
+WantedBy=multi-user.target
