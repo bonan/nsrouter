@@ -47,9 +47,11 @@ $ ls -l instance/wan/
 
 `interfaces` contains a list of which bridges that the instance should join.
 
-`start.sh`, `stop.sh` and `reload.sh` are scripts where you can specify what should happen when starting/stopping/reloading the instance
+`start.sh`, `stop.sh` and `reload.sh` are scripts where you can specify what should happen when starting/stopping/reloading the instance.
 
-See the samples in [instaces](instances/) for sample instances.
+You can use the environment variables `$INSTANCE` to get the name of the instance and `$INST_DIR` to get the path to the instance directory within your scripts.
+
+See the samples in [instance/](instance/) for sample instances.
 
 To stop the instance again, run:
 ```bash
