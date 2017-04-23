@@ -72,6 +72,11 @@ udp        0      0 0.0.0.0:68              0.0.0.0:*                           
 ```
 (feels nice to not have any unnecessary services binding to your WAN ip!)
 
+`FORWARD` rules in the system namespace might affect the bridge. To avoid that, set these in sysctl:
+```
+net.bridge.bridge-nf-call-iptables=0
+net.bridge.bridge-nf-call-ip6tables=0
+```
 
 ## Why?
 I have my own home server that does both internet sharing and runs different services, doing both is sometimes a headache and installing
