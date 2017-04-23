@@ -62,6 +62,17 @@ You can also run nsRouter with systemd, install [nsrouter@.service](nsrouter@.se
 
 After installing the unit file, you can start the `wan` instance again by running `systemctl start nsrouter@wan.service`
 
+## Debugging
+You can use the `ip netns exec` command to run commands in the nsRouter namespace, for example:
+```
+# ip netns exec wan netstat -antup
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           89539/dhclient
+```
+(feels nice to not have any unnecessary services binding to your WAN ip!)
+
+
 ## Why?
 I have my own home server that does both internet sharing and runs different services, doing both is sometimes a headache and installing
 something new might break internet access.
