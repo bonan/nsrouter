@@ -1,5 +1,7 @@
 # nsRouter - Run routing in its own namespace!
 
+## Status of project
+This project is currently only a Proof-of-Concept and should not be considered stable.
 
 ## Prerequisites
 You need to have a linux kernel with support for namespaces, iproute2 + tools installed,
@@ -91,3 +93,4 @@ My main reasons for creating this project are:
 ## TODO
 * [ ] Investigate if `PrivateNetwork` in systemd can be used instead of `ip netns`
 * [ ] Support non-bridge interfaces (move interface to namespace)
+* [ ] Rewrite in Go
