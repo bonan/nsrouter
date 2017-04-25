@@ -1,8 +1,13 @@
 #!/bin/bash
 ME=$0
 
+INIT_CMD=$1
+shift
+export INSTANCE=$1
+shift
+
 export DIR="$(dirname $0)"
-export INSTANCE=$2
+export NS_CMD="$*"
 
 if [ "$NS_DEBUG" = "1" ]; then
   set -x
@@ -29,8 +34,12 @@ function nsr_init {
     "reload_inside")
       nsr_reload_inside $2
       ;;
+    "enter")
+      echo "Running command \"${NS_CMD}\" in namespace $2"
+      ip netns exec $2 $NS_CMD
+      ;;
     *)
-      echo "Usage: $ME <start|stop|restart|reload> <instance>"
+      echo "Usage: $ME <start|stop|restart|reload|enter> <instance> <command>"
       exit 1
       ;;
   esac
@@ -119,7 +128,9 @@ function nsr_start {
     IF_CNT=$[IF_CNT + 1]
   done
 
-  ip netns exec $1 $ME inside $1
+  trap "nsr_stop_internal $1" SIGINT SIGTERM
+
+  ip netns exec $1 $ME inside $1 $NS_CMD
   nsr_stop_internal $1
 }
 
@@ -155,6 +166,7 @@ function nsr_stop {
 }
 
 function nsr_stop_internal {
+  echo "nsrouter stopping"
   export INST_DIR="$DIR/instance/$1"
   IF_LIST="$(cat "$INST_DIR/interfaces")"
   if [ -f /var/run/netns/$1 ]; then
@@ -163,18 +175,21 @@ function nsr_stop_internal {
       if [ -f "$INST_DIR/interfaces" ]; then
         IF_CNT=0
         for IF in $IF_LIST; do
-          ip netns exec $1 ip link del eth${IF_CNT} >/dev/null 2>&1
+          echo -n "Bringing down eth${IF_CNT}: "
+          ip netns exec $1 ip link del eth${IF_CNT} && echo "."
           IF_CNT=$[IF_CNT + 1]
         done
       fi
     fi
-    ip netns del $1
+    echo -n "Deleting namespace: "
+    ip netns del $1 && echo "."
   fi
   IF_CNT=0
   for IF in $IF_LIST; do
     ip link del ${1}-eth${IF_CNT} >/dev/null 2>&1
     IF_CNT=$[IF_CNT + 1]
   done
+  [ -f $INST_DIR/pid ] && rm $INST_DIR/pid
 }
 
 function nsr_inside {
@@ -184,18 +199,26 @@ function nsr_inside {
   sysctl net.ipv4.ip_forward=1
   sysctl net.ipv6.conf.all.forwarding=1
   [ -x "${INST_DIR}/start.sh" ] && "${INST_DIR}/start.sh"
-  nsr_reload_inside $1
-  while true; do sleep 9999; done
+  nsr_reload_inside $1 || exit 1
+  ip addr show
+  ip route show
+  if [ ! -z "$NS_CMD" ]; then
+    echo "Starting $NS_CMD:"
+    $NS_CMD
+  else
+    echo "Successfully started with pid $$, use kill or ^C to shut down nsrouter"
+    while true; do sleep 3600; done
+  fi
 }
 
 function nsr_reload_inside {
   export INST_DIR="$DIR/instance/$1"
-  [ -x "${INST_DIR}/reload.sh" ] && "${INST_DIR}/reload.sh"
+  [ -x "${INST_DIR}/reload.sh" ] && "${INST_DIR}/reload.sh" 
 }
 
 function nsr_reload {
   ip netns exec $1 $ME reload_inside $1 
 }
 
-nsr_init $1 $2
-
+nsr_init $INIT_CMD $INSTANCE
+exit $?
