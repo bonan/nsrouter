@@ -113,17 +113,10 @@ function nsr_start {
     fi
 
     echo "Bringing up $NAME (bridge $IF):"
-    ip link add $NAME type veth peer veth$VETH || fail "" $NAME || exit 34
-    ip link set dev veth$VETH netns $1 || fail "Unable to move $NAME veth to namespace ${1}" $NAME || exit 35
-
-    # Rename inside interface
-    ip netns exec $1 ip link set dev veth$VETH name eth${IF_CNT} || fail "Unable to rename inside interface to eth${IF_CNT}" || exit 36
+    ip link add $NAME type veth peer name eth${IF_CNT} netns $1 || fail "Unable to create interface $NAME" $NAME || exit 34
 
     # Join outside interface to bridge
-    ip link set dev $NAME master $IF || fail "Unable to join $NAME to bridge $IF" || exit 37
-
-    # Bring up outside interface
-    ip link set $NAME up || fail "Unable to bring up $NAME (outside)" || exit 38
+    ip link set dev $NAME up master $IF || fail "Unable to join $NAME to bridge $IF" || exit 37
 
     IF_CNT=$[IF_CNT + 1]
   done
