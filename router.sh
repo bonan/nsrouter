@@ -35,8 +35,17 @@ function nsr_init {
       nsr_reload_inside $2
       ;;
     "enter")
+      if [ ! -f $DIR/instance/$2/pid ]; then
+        echo "Namespace $2 is not started"
+        exit 1
+      fi
+      pid=$(cat $DIR/instance/$2/pid)
+      if [ ! -x /proc/$pid ]; then
+        echo "Namespace $2 is not started"
+        exit 1
+      fi
       echo "Running command \"${NS_CMD}\" in namespace $2"
-      ip netns exec $2 $NS_CMD
+      nsenter -t $pid -m -n -u $NS_CMD
       ;;
     *)
       echo "Usage: $ME <start|stop|restart|reload|enter> <instance> <command>"
@@ -45,6 +54,13 @@ function nsr_init {
   esac
 }
 
+function nsr_custom {
+  if [ -f "$INST_DIR/custom.sh" ]; then
+    . $INST_DIR/custom.sh $*
+    return $?
+  fi
+  return 0
+}
 
 function nsr_start {
   IF_VAR="IF_$1"
@@ -104,26 +120,32 @@ function nsr_start {
 
 
   for IF in $IF_LIST; do
-    BRIDGE=$(ip link show dev $IF type bridge)
-    NAME="${IF_NAME}${IF_CNT}"
-    if [ "$BRIDGE" = "" ]; then
-      echo "Bridge $IF doesn't exist, trying to create it"
-      ip link add $IF type bridge || fail "Unable to create bridge $IF" || exit 32
-      ip link set $IF up || fail "Unable to start bridge $IF" || exit 33
+    BRIDGE=$(ip link show dev $IF)
+    export NAME="${IF_NAME}${IF_CNT}"
+
+    nsr_custom $1 $IF $NAME eth${IF_CNT}
+    if [ $? -eq 0 ]; then
+      if [ "$BRIDGE" = "" ]; then
+        echo "Bridge $IF doesn't exist, trying to create it"
+        ip link add $IF type bridge || fail "Unable to create bridge $IF" || exit 32
+        ip link set $IF up || fail "Unable to start bridge $IF" || exit 33
+      fi
+
+      echo "Bringing up $NAME (bridge $IF):"
+      ip link add $NAME type veth peer name eth${IF_CNT} netns $1 || fail "Unable to create interface $NAME" $NAME || exit 34
+
+      # Join outside interface to bridge
+      ip link set dev $NAME up master $IF || fail "Unable to join $NAME to bridge $IF" || exit 37
     fi
-
-    echo "Bringing up $NAME (bridge $IF):"
-    ip link add $NAME type veth peer name eth${IF_CNT} netns $1 || fail "Unable to create interface $NAME" $NAME || exit 34
-
-    # Join outside interface to bridge
-    ip link set dev $NAME up master $IF || fail "Unable to join $NAME to bridge $IF" || exit 37
-
     IF_CNT=$[IF_CNT + 1]
   done
 
   trap "nsr_stop_internal $1" SIGINT SIGTERM
 
-  ip netns exec $1 $ME inside $1 $NS_CMD
+  mkdir -p /var/run/nsrouter/$1
+  cat /etc/resolv.conf > /var/run/nsrouter/$1/resolv.conf
+  grep -vE $(hostname) /etc/hosts > /var/run/nsrouter/$1/hosts
+  ip netns exec $1 unshare -m -u $ME inside $1 $NS_CMD
   nsr_stop_internal $1
 }
 
@@ -186,6 +208,10 @@ function nsr_stop_internal {
 }
 
 function nsr_inside {
+  mount -o bind /var/run/nsrouter/$1/resolv.conf /etc/resolv.conf
+  mount -o bind /var/run/nsrouter/$1/hosts /etc/hosts
+  hostname $(hostname)-$1
+  echo "127.0.1.1 $(hostname --fqdn) $(hostname)" >> /etc/hosts
   export INST_DIR="$DIR/instance/$1"
   echo $$ > $INST_DIR/pid
   ip link set dev lo up
